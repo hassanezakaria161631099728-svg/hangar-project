@@ -126,59 +126,60 @@ def reactions(k,bt,bt2,ba,ed,Fwehor,Fwi1hor,Fwi2hor,Fwez,Fwi1z,Fwi2z,b,srt,x,y,z
         Rzhori1[i] = Rz1i[i] * hor[i]
         Rzhori2[i] = Rz2i[i] * hor[i]
     # Sums
-    Rhor1 = np.sum(Rhor1i[:ed - 1])
-    ZRhor1 = np.sum(Rhorzi1[:ed - 1]) / Rhor1 if Rhor1 != 0 else 0
-    Rhor2 = np.sum(Rhor2i[:ed - 1])
-    ZRhor2 = np.sum(Rhorzi2[:ed - 1]) / Rhor2 if Rhor2 != 0 else 0
-    Rhor = [Rhor1, Rhor2]
-    ZRhor = [ZRhor1, ZRhor2]
+    Rhor1 = np.sum(Rhor1i[:ed - 1])#wi1-
+    ZRhor1 = np.sum(Rhorzi1[:ed - 1]) / Rhor1 
+    Rhor2 = np.sum(Rhor2i[:ed - 1])#wi2+
+    ZRhor2 = np.sum(Rhorzi2[:ed - 1]) / Rhor2 
     Rz1 = np.sum(Rz1i[ed - 1:])
-    horRz1 = np.sum(Rzhori1[ed - 1:]) / Rz1 if Rz1 != 0 else 0
+    horRz1 = np.sum(Rzhori1[ed - 1:]) / Rz1
     Rz2 = np.sum(Rz2i[ed - 1:])
-    horRz2 = np.sum(Rzhori2[ed - 1:]) / Rz2 if Rz2 != 0 else 0
-    Rz = [Rz1, Rz2]
-    horRz = [horRz1, horRz2]
-    row = ["wi1-", "wi2+"]
+    horRz2 = np.sum(Rzhori2[ed - 1:]) / Rz2 
     # --- Flat roof case ---
-    if bt == "flat roof":
+    if bt == "flat roof": # we work according to eurocode -0.3 +0.2
         sI = srt[3]  # MATLAB srt(4)
         if sI > 0:
-            Rz1 = np.sum(Rz1i[ed - 1:k - 1])
-            horRz1 = np.sum(Rzhori1[ed - 1:k - 1]) / Rz1 if Rz1 != 0 else 0
-            Rz2 = np.sum(Rz2i[ed - 1:k - 1])
-            horRz2 = np.sum(Rzhori2[ed - 1:k - 1]) / Rz2 if Rz2 != 0 else 0
-            Rver3 = np.sum(Rz1i[ed - 1:k - 2]) + Rz1i[k - 1]
-            horRver3 = (np.sum(Rzhori1[ed - 1:k - 2]) + Rzhori1[k - 1]) / Rz1 if Rz1 != 0 else 0
-            Rver4 = np.sum(Rz2i[ed - 1:k - 2]) + Rz2i[k - 1]
-            horRver4 = (np.sum(Rzhori2[ed - 1:k - 2]) + Rzhori2[k - 1]) / Rz2 if Rz2 != 0 else 0
-            Rz = [Rz1, Rz2, Rver3, Rver4]
-            horRz = [horRz1, horRz2, horRver3, horRver4]
+            Rz3 = np.sum(Rz1i[ed - 1:k - 2]) + Rz1i[k - 1]
+            horRz3 = (np.sum(Rzhori1[ed - 1:k - 2]) + Rzhori1[k - 1]) / Rz1 if Rz1 != 0 else 0
+            Rz4 = np.sum(Rz2i[ed - 1:k - 2]) + Rz2i[k - 1]
+            horRz4 = (np.sum(Rzhori2[ed - 1:k - 2]) + Rzhori2[k - 1]) / Rz2 if Rz2 != 0 else 0
             Rhor = [Rhor1, Rhor2, Rhor1, Rhor2]
             ZRhor = [ZRhor1, ZRhor2, ZRhor1, ZRhor2]
+            Rz = [Rz1,Rz2,Rz3,Rz4]
+            horRz = [horRz1, horRz2, horRz3, horRz4]
             row = ["wi- I-", "wi+ I-", "wi- I+", "wi+ I+"]
-        else: raise ValueError("sI has to be >0")
+        elif sI==0:
+            Rhor = [Rhor1,Rhor2]
+            ZRhor = [ZRhor1,ZRhor2]
+            Rz = [Rz1,Rz2]
+            horRz = [horRz1,horRz2]
+            row = ["wi1-","wi2+"]
+        else: raise ValueError("sI has to be >=0")
     # --- Hangar case ---
     elif bt == "hangar":
-        Rhor = [Rhor1]
-        Rz = [Rz1]
-        T = ba["Ly_m"].iloc[0]  
-        horRz = [horRz1]
-        ZRhor = [ZRhor1]
-        row = ["row"]
-        if bt2 == "gable" and b == T:
+        T=ba["Ly_m"].iloc[0]
+        L=ba["Lx_m"].iloc[0]         
+        if bt2 == "gable":
+           if b==L: #wind2
+            Rhor = [Rhor1]
+            ZRhor = [ZRhor1]
+            Rz = [Rz1]
+            horRz = [horRz1]
+            row = ["row"]
+           elif b==T: #wind1
             Rz1 = np.sum(Rz1i[ed - 1:k - 6])
             horRz1 = np.sum(Rzhori1[ed - 1:k - 6]) / Rz1 if Rz1 != 0 else 0
             Rz2 = np.sum(Rz1i[ed - 1:k - 7]) + Rz1i[k - 1]
             horRz2 = (np.sum(Rzhori1[ed - 1:k - 7]) + Rzhori1[k - 1]) / Rz1 if Rz1 != 0 else 0
-            Rver3 = np.sum(Rz1i[ed + 3:k - 1])
-            horRver3 = np.sum(Rzhori1[ed + 3:k - 1]) / Rz1 if Rz1 != 0 else 0
-            Rver4 = np.sum(Rz1i[k - 6:k])
-            horRver4 = np.sum(Rzhori1[k - 6:k]) / Rz1 if Rz1 != 0 else 0
-            Rz = [Rz1, Rz2, Rver3, Rver4]
-            horRz = [horRz1, horRz2, horRver3, horRver4]
+            Rz3 = np.sum(Rz1i[ed + 3:k - 1])
+            horRz3 = np.sum(Rzhori1[ed + 3:k - 1]) / Rz1 if Rz1 != 0 else 0
+            Rz4 = np.sum(Rz1i[k - 6:k])
+            horRz4 = np.sum(Rzhori1[k - 6:k]) / Rz1 if Rz1 != 0 else 0
             Rhor = [Rhor1] * 4
             ZRhor = [ZRhor1] * 4
+            Rz = [Rz1, Rz2, Rz3, Rz4]
+            horRz = [horRz1, horRz2, horRz3, horRz4]
             row = ["--", "-+", "+-", "++"]
+           else: raise ValueError("b has to be either T or L ")
         else: raise ValueError("unexpected bt2")     
     else: raise ValueError("unexpected bt")
     # --- Final moment calc ---
