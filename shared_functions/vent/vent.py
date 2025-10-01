@@ -8,6 +8,65 @@ from .cpi import cpi               # if cpi is its own file/module
 from .action_of_set import action_of_set
 from .surfaces import (wall_perpendicular,wall_parallel,roof_list,roof_array)
 
+
+def vent(ba,Lx,Ly,direction,geo,wzs,gcs) -> Tuple[Any, Any, Any, Any, Any, Any, Any]:
+ bt=ba["bt"].iloc[0]
+ bt2 = ba["bt2"].iloc[0]  # column 7 -> index 6
+# --- call dw (direction of wind) ---
+# This function is expected to have side effects like setting global variables or writing files in the MATLAB code.
+# Keep the same call signature; implement dw separately in Python.
+ b,d=dimensions(Lx,Ly,direction)
+ bt=ba["bt"].iloc[0]
+ bt2=ba["bt2"].iloc[0]
+ T1,T2,qpze1,qpze2=pression_dynamique_de_pointe(b,d,geo,ba,wzs,gcs)
+# --- surfaces in m^2: e = T1{1,4}  (MATLAB 1-based) ---
+ e=T1["e_m"].iloc[0]   # zero-based: row 0, col 3
+# --- walls surfaces
+ h1,h2,sd1,sd2,se=wall_perpendicular(ba,b)
+ cd,sa,sb,sc=wall_parallel(h1,h2,b,d,bt,e)
+# --- sw (stacked vertically)
+ sw=np.array([sd1,sd2,se,sa,sb,sc], dtype=float)
+#cpe
+ Twall=wall()
+ nw=Twall.shape[1]
+ cpew=cpe_from_s(nw,Twall,sw)
+ cw,sw2,cpew2=s_cpe_wall_array(sw,cpew)
+#roof
+# fshroof returns (something, srt) in MATLAB where first output is unused (~)
+ sf,sg,sh,sJ,sI=roof_list(b,d,ba,bt2,e)
+ srt,crt=roof_array(sf,sg,sh,sJ,sI,bt,bt2,b,ba,h1,h2) 
+# --- epf roof
+ Troof=roof(ba,bt,bt2,b,h1,h2)
+ crt2,srt2,cpert=s_cpe_roof_array(Troof,b,ba,srt,bt,bt2)
+  # Concatenate epf arrays similar to MATLAB epf=[epfw;epfrt]
+    # In Python we will just create a list or numpy array depending on inputs
+ try:
+    cpe = np.concatenate([np.atleast_1d(cpew2), np.atleast_1d(cpert)])
+    c= np.concatenate([np.atleast_1d(cw), np.atleast_1d(crt2)])
+    s= np.concatenate([np.atleast_1d(sw2), np.atleast_1d(srt2)])
+    ncpe=len(cpe)
+ except Exception:
+ # fallback to lists
+  cpe = list(cpew) + list(cpert)
+ c=list(cw) + list(crt2)
+ s=list(sw2) + list(srt2)
+ ncpe=len(cpe)
+# --- ipf internal pressure factors ---
+ cpi1,cpi2=cpi(bt,bt2,ba,b,d,ncpe,h1)
+# --- aerodynamic pressure exerted on surfaces ---
+ we=wewi(cpe,sw,qpze1,qpze2)
+ wi1=wewi(cpi1,sw,qpze1,qpze2)
+ wi2=wewi(cpi2,sw,qpze1,qpze2)
+# --- build T3 table depending on roof type ---
+ if bt == "flat roof":
+  T3 = pd.DataFrame({"c": c,"epf": cpe,"ipf1": cpi1,"ipf2": cpi2,"we": we,"wi1": wi1,"wi2": wi2})
+ elif bt == "hangar":
+  T3 = pd.DataFrame({"c": c,"epf": cpe,"ipf1": cpi1,"we": we,"wi1": wi1})
+ else: raise ValueError("Unexpected building type")
+# --- action of set ---
+ T4,T5=action_of_set(crt2,sw,we,wi1,wi2,cd,s,e,b,d,ba,bt,bt2,Lx,Ly,srt,h1)
+ return T1,T2,T3,T4,T5,Troof,Twall
+
 def dimensions(Lx,Ly,direction):
     if direction == 'wind1':
         b = Ly
@@ -78,62 +137,4 @@ def wewi(pf,sw,qpze1,qpze2=None): #aerodynamic pressure on surfaces
         w[1:]=pf[1:]*qpze2
     else: raise ValueError("sd2 is negative")
     return w
-
-def vent(ba,Lx,Ly,direction,geo,wzs,gcs) -> Tuple[Any, Any, Any, Any, Any, Any, Any]:
- bt=ba["bt"].iloc[0]
- bt2 = ba["bt2"].iloc[0]  # column 7 -> index 6
-# --- call dw (direction of wind) ---
-# This function is expected to have side effects like setting global variables or writing files in the MATLAB code.
-# Keep the same call signature; implement dw separately in Python.
- b,d=dimensions(Lx,Ly,direction)
- bt=ba["bt"].iloc[0]
- bt2=ba["bt2"].iloc[0]
- T1,T2,qpze1,qpze2=pression_dynamique_de_pointe(b,d,geo,ba,wzs,gcs)
-# --- surfaces in m^2: e = T1{1,4}  (MATLAB 1-based) ---
- e=T1["e_m"].iloc[0]   # zero-based: row 0, col 3
-# --- walls surfaces
- h1,h2,sd1,sd2,se=wall_perpendicular(ba,b)
- cd,sa,sb,sc=wall_parallel(h1,h2,b,d,bt,e)
-# --- sw (stacked vertically)
- sw=np.array([sd1,sd2,se,sa,sb,sc], dtype=float)
-#cpe
- Twall=wall()
- nw=Twall.shape[1]
- cpew=cpe_from_s(nw,Twall,sw)
- cw,sw2,cpew2=s_cpe_wall_array(sw,cpew)
-#roof
-# fshroof returns (something, srt) in MATLAB where first output is unused (~)
- sf,sg,sh,sJ,sI=roof_list(b,d,ba,bt2,e)
- srt,crt=roof_array(sf,sg,sh,sJ,sI,bt,bt2,b,ba,h1,h2) 
-# --- epf roof
- Troof=roof(ba,bt,bt2,b,h1,h2)
- crt2,srt2,cpert=s_cpe_roof_array(Troof,b,ba,srt,bt,bt2)
-  # Concatenate epf arrays similar to MATLAB epf=[epfw;epfrt]
-    # In Python we will just create a list or numpy array depending on inputs
- try:
-    cpe = np.concatenate([np.atleast_1d(cpew2), np.atleast_1d(cpert)])
-    c= np.concatenate([np.atleast_1d(cw), np.atleast_1d(crt2)])
-    s= np.concatenate([np.atleast_1d(sw2), np.atleast_1d(srt2)])
-    ncpe=len(cpe)
- except Exception:
- # fallback to lists
-  cpe = list(cpew) + list(cpert)
- c=list(cw) + list(crt2)
- s=list(sw2) + list(srt2)
- ncpe=len(cpe)
-# --- ipf internal pressure factors ---
- cpi1,cpi2=cpi(bt,bt2,ba,b,d,ncpe,h1)
-# --- aerodynamic pressure exerted on surfaces ---
- we=wewi(cpe,sw,qpze1,qpze2)
- wi1=wewi(cpi1,sw,qpze1,qpze2)
- wi2=wewi(cpi2,sw,qpze1,qpze2)
-# --- build T3 table depending on roof type ---
- if bt == "flat roof":
-  T3 = pd.DataFrame({"c": c,"epf": cpe,"ipf1": cpi1,"ipf2": cpi2,"we": we,"wi1": wi1,"wi2": wi2})
- elif bt == "hangar":
-  T3 = pd.DataFrame({"c": c,"epf": cpe,"ipf1": cpi1,"we": we,"wi1": wi1})
- else: raise ValueError("Unexpected building type")
-# --- action of set ---
- T4,T5=action_of_set(crt2,sw,we,wi1,wi2,cd,s,e,b,d,ba,bt,bt2,Lx,Ly,srt,h1)
- return T1,T2,T3,T4,T5,Troof,Twall
 
