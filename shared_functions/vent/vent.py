@@ -8,7 +8,6 @@ from .cpi import cpi               # if cpi is its own file/module
 from .action_of_set import action_of_set
 from .surfaces import (wall_perpendicular,wall_parallel,roof_list,roof_array)
 
-
 def vent(ba,Lx,Ly,direction,geo,wzs,gcs) -> Tuple[Any, Any, Any, Any, Any, Any, Any]:
  bt=ba["bt"].iloc[0]
  bt2 = ba["bt2"].iloc[0]  # column 7 -> index 6

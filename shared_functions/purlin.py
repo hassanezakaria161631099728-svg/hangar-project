@@ -1,20 +1,21 @@
 import numpy as np
 import pandas as pd
-from .utils import comb,snow,beam3,fvplrd,bending,resistance,lateral_torsional_buckling,find_epf
+from .utils import (comb,snow,beam3,fvplrd,bending,resistance,lateral_torsional_buckling,find_epf,
+moment_shear_defection)
 
 def purlin(b1,b2,hangarf,chI,beamT):
     # === Call purlin0 ===
     ba,geo,Troof1,Troof2,in1,in2,in3,in6,in7,in8=purlin0(hangarf,chI)
-    bt = ba["bt"].iloc[0]   
+    bt2 = ba["bt2"].iloc[0]   
     Lx = ba["Lx_m"].iloc[0]   
     Ly = ba["Ly_m"].iloc[0]   
     # === Snow loads ===
     s = snow(geo,ba,Ly,Lx,Ly)
     bp = 1.355  # largeur d'influence m
     # === Wind loads from panne1 ===
-    qw1 = purlin1(ba,bt,b1,Troof1,in1,in2,in3,bp)
-    qw2 = purlin1(ba,bt,b2,Troof2,in6,in7,in8,bp)
-    qws = np.vstack([qw1,qw2])  # stack vertically like MATLAB [qw1; qw2]
+    qw1 = purlin1(ba,bt2,b1,Troof1,in1,in2,in3,bp)
+    qw2 = purlin1(ba,bt2,b2,Troof2,in6,in7,in8,bp)
+    qws = np.concatenate([np.atleast_1d(qw1), np.atleast_1d(qw2)])/10#convert to daN/m
     qw = np.max(np.abs(qws))    
     t = Ly / 4.0
     alpha = ba["slope_angle_deg"].iloc[0]   # ba{1,5}
@@ -39,7 +40,7 @@ def purlin(b1,b2,hangarf,chI,beamT):
     Qz = Q * np.sin(np.deg2rad(alpha))
     loads = pd.DataFrame({"axis": ["y", "z"],
         "Q": [Qy, Qz],"qw": [qw, 0],"qwp": [qwp, 0],"qs": [qsy, qsz],"qg": [qgy, qgz]})
-    # === Call panne2 ===
+    # === Call purlin2 ===
     Tcomb = pd.read_excel(beamT,sheet_name="comb_psi")
     acp,combdel,combV,combM,delmax,del2,Vysdn,Vzsdp,Mysdn,Mzscorr,Mysdp,Mzsdp=purlin2(
     Tpanne,qgy,qgz,qw,Qy,Qz,qwp,qsy,qsz,Ly,Tcomb)
@@ -60,7 +61,7 @@ def purlin(b1,b2,hangarf,chI,beamT):
         "c1": [c1],"c2": [c2],"lalt": [lalt],"laltb": [laltb],"alphalt": [alphalt],
         "philt": [philt],"xlt": [xlt],"Mysdn": [Mysdn],"Mzscorr": [Mzscorr],"rd": [rd]})
     # === Lierne ===
-    T10 = purlin_bracing(t, qgp, qgc, s, alpha, Lx)
+    T10 = purlin_bracing(t,qgp,qgc,s,alpha,Lx,Tcomb)
     return Tpanne, T2, loads, acp, combdel, combV, combM, T8, T9, T10
 
 def purlin0(hangarf, chapterI):
@@ -144,9 +145,8 @@ def purlin1(ba, bt, b, Troof1, T1, T2, T3, bp):
         raise ValueError("unexpected bt")
     return qw
 
-
 def purlin2(T1,qgy,qgz,qw,Qy,Qz,qwp,qsy,qsz,Ly,Tcomb):
-    Iy = T1.iloc[0, 9]  # cm^4
+    Iy = T1["Iy"].iloc[0]  # cm^4
     # --- Call purlin21 ---
     (Mgy, Vgy, delgy, Mw, Vw, delw, MQy, VQy, delQy,
      Mgz, Vgz, MQz, VQz, Mwp, Vwp, delwp,
@@ -165,26 +165,26 @@ def purlin2(T1,qgy,qgz,qw,Qy,Qz,qwp,qsy,qsz,Ly,Tcomb):
     # --- Call purlin24 (ELU, shear) ---
     combV, Vysdn, _, _, Vzsdp = purlin24(Vgy, Vgz, Vw, VQy, Vsy, Vwp, VQz, Vsz,Tcomb)
     # --- Call purlin24 (ELU, moment) ---
-    combM, Mysdn, Mzscorr, Mysdp, Mzsdp = purlin24(Mgy, Mgz, Mw, MQy, Msy, Mwp, MQz, Msz)
+    combM, Mysdn, Mzscorr, Mysdp, Mzsdp = purlin24(Mgy,Mgz,Mw,MQy,Msy,Mwp,MQz,Msz,Tcomb)
     return acp, combdel, combV, combM, delmax, del2, Vysdn, Vzsdp, Mysdn, Mzscorr, Mysdp, Mzsdp
 
-def purlin21(qgy, qgz, qw, Qy, Qz, qwp, qsy, qsz, Iy, Ly, MV):
+def purlin21(qgy,qgz,qw,Qy,Qz,qwp,qsy,qsz,Iy,Ly):
     t = Ly / 4.0
     L = t
     lt1 = "uniform"
     lt2 = "double ponctuel"
     # Loads on y-axis
-    Mgy, Vgy, delgy = MV(lt1, "y", qgy * 1e-5, L, Iy * 1e-8)
-    Mw, Vw, delw    = MV(lt1, "y", qw   * 1e-5, L, Iy * 1e-8)
-    MQy, VQy, delQy = MV(lt2, "y", Qy   * 1e-5, L, Iy * 1e-8)
+    Mgy, Vgy, delgy = moment_shear_defection(lt1, "y", qgy * 1e-5, L, Iy * 1e-8)
+    Mw, Vw, delw    = moment_shear_defection(lt1, "y", qw   * 1e-5, L, Iy * 1e-8)
+    MQy, VQy, delQy = moment_shear_defection(lt2, "y", Qy   * 1e-5, L, Iy * 1e-8)
     # Loads on z-axis
-    Mgz, Vgz, _     = MV(lt1, "z", qgz * 1e-5, L, Iy)
-    MQz, VQz, _     = MV(lt2, "z", Qz * 1e-5, L, Iy)
+    Mgz, Vgz, _     = moment_shear_defection(lt1, "z", qgz * 1e-5, L, Iy)
+    MQz, VQz, _     = moment_shear_defection(lt2, "z", Qz * 1e-5, L, Iy)
     # Wind punctual load
-    Mwp, Vwp, delwp = MV(lt1, "y", qwp * 1e-5, L, Iy * 1e-8)
+    Mwp, Vwp, delwp = moment_shear_defection(lt1, "y", qwp * 1e-5, L, Iy * 1e-8)
     # Snow loads
-    Msy, Vsy, delsy = MV(lt1, "y", qsy * 1e-5, L, Iy * 1e-8)
-    Msz, Vsz, _     = MV(lt1, "y", qsz * 1e-5, L, Iy)
+    Msy, Vsy, delsy = moment_shear_defection(lt1, "y", qsy * 1e-5, L, Iy * 1e-8)
+    Msz, Vsz, _     = moment_shear_defection(lt1, "y", qsz * 1e-5, L, Iy)
     return (Mgy, Vgy, delgy,
             Mw, Vw, delw,
             MQy, VQy, delQy,
@@ -239,16 +239,16 @@ def purlin23(gy, w, Qy, wp, sy,Tcomb):
     n = 8
     a = np.ones(n)  # vector of ones
     cas = ["ELS"] * n
-    psi0 = Tcomb.loc[Tcomb["loads"] == "snow_load", "psi0"].values[0]
+    psi0 = Tcomb.loc[Tcomb["loads"] == "snow load", "psi0"].values[0]
     psi0_array=[psi0]*n    
-    # Expand vectors (like MATLAB [del1;del0])
+    # Expand vectors 
     V1 = np.concatenate([del1, del0])
     V2 = np.concatenate([del2, del2])
     V3 = np.concatenate([del3, del3])
     # Calculate combination deflections
     delvals = np.zeros(n)
     for i in range(n):
-        delvals[i] = comb(V1[i],V2[i],V3[i],cas[i],a[i],psi0_array)
+        delvals[i] = comb(V1[i],V2[i],V3[i],cas[i],a[i],psi0_array[i])
                      #comb(G,Q1,Qi,cas,a,psi0): 
     # Combination labels
     c = [
@@ -271,11 +271,11 @@ def purlin24(gy,gz,w,Qy,sy,wp,Qz,sz,Tcomb):
     combVvals = np.zeros(n)
     a = np.ones(n)        # like MATLAB zeros then set to 1
     cas = ["ELU"] * n
-    psi0 = Tcomb.loc[Tcomb["loads"] == "snow_load", "psi0"].values[0]
+    psi0 = Tcomb.loc[Tcomb["loads"] == "snow load", "psi0"].values[0]
     psi0_array=[psi0]*n    
     # Apply combination function
     for i in range(n):
-        combVvals[i] = comb(V1[i],V2[i],V3[i],cas[i],a[i],psi0_array)
+        combVvals[i] = comb(V1[i],V2[i],V3[i],cas[i],a[i],psi0_array[i])
     # Axis labels
     c = ["y", "y", "y", "y", "z", "z"]
     # Combination labels
@@ -296,16 +296,17 @@ def purlin24(gy,gz,w,Qy,sy,wp,Qz,sz,Tcomb):
     zscorr = gz * 1e5               # corrected z shear
     return com, ysdn, zscorr, ysdp, zsdp
 
-def purlin_bracing(t, qgp, qgc, s2, alpha, L, filepath="load_factors.xlsx", sheet="psi_factors"):
+def purlin_bracing(t,qgp,qgc,s,alpha,L,Tcomb):
     np_val = 7                 # number of purlins
     d = 1.41                   # spacing (m)
     B = (L / 2) / np.cos(np.radians(alpha)) - 0.6 - d / 2
     # Loads
     G = (np_val - 1) * qgp + qgc * B
-    Q1 = s2 * B
+    Q1 = s * B
     # Combination (ELU, snow case)
-    qsdt = comb(G, Q1, 0, "ELU", 1, "snow load",
-                filepath=filepath, sheet=sheet)
+          #comb(G,Q1,Qi,cas,a,psi0):
+    psi0 = Tcomb.loc[Tcomb["loads"] == "snow load", "psi0"].values[0]
+    qsdt = comb(G,Q1,0,"ELU",1,psi0)
     # Tie force
     NT = 1.25 * qsdt * np.sin(np.radians(alpha)) * t / 2
     beta = np.degrees(np.arctan(d / (t / 2)))

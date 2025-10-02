@@ -1,5 +1,5 @@
 import numpy as np
-
+import pandas as pd
 def comb(G,Q1,Qi,cas,a,psi0):
     gamg = 1.35
     gamq = 1.5
@@ -58,7 +58,7 @@ def beam3(L,q,T):
 def beam4(minval,column,T):
     # Adjust MATLAB 1-based column index to Python 0-based
     col_idx = column - 1
-    vals = T.iloc[:, col_idx]
+    vals = pd.to_numeric(T.iloc[:, col_idx], errors="coerce")
     valid_rows = vals[vals >= minval]
     if valid_rows.empty:
         print("No rows satisfy the condition.")
@@ -66,15 +66,15 @@ def beam4(minval,column,T):
     else:
         t_val = valid_rows.min()
         t_idx = vals[vals == t_val].index[0]
-    return T.loc[t_idx]
+    return T.loc[[t_idx]]
 
 def fvplrd(cas, sb, b, Vsd):
     # Extract properties (MATLAB sb{1,n} corresponds to sb.iloc[n-1])
-    bf = sb.iloc[2]   # flange width (cm)
-    tw = sb.iloc[3]   # web thickness (cm)
-    tf = sb.iloc[4]   # flange thickness (cm)
-    r  = sb.iloc[5]   # radius (cm)
-    A  = sb.iloc[8]   # cross-sectional area (cm^2)
+    bf = sb["b"].iloc[0]   # flange width (cm)
+    tw = sb["tw"].iloc[0]   # web thickness (cm)
+    tf = sb["tf"].iloc[0]   # flange thickness (cm)
+    r  = sb["r"].iloc[0]   # radius (cm)
+    A  = sb["A"].iloc[0]   # cross-sectional area (cm^2)
     if cas == "y":
         if b == "UPE":
             p = 1
@@ -91,9 +91,9 @@ def fvplrd(cas, sb, b, Vsd):
     # Check shear resistance
     if Vsd < 0.5 * Vplrd:
         if cas == "y":
-            print("Résistance à l'effort tranchant valide suivant y")
+            print("shear resistance on y axis has been aquired")
         elif cas == "z":
-            print("Résistance à l'effort tranchant valide suivant z")
+            print("shear resistance on z axis has been aquired")
     return Av, Vplrd
 
 def bending(del2, delmax, L):
@@ -261,3 +261,41 @@ def find_epf(epf1, epf10, s):
         return epf1 + (epf10 - epf1) * np.log10(s)
     else:  # s >= 10
         return epf10
+
+def moment_shear_defection(lt, cas, q, L, I):
+    """Maximum moment, shear force, and deflection of a beam.
+    Parameters:
+        lt (str): load type ('uniform' or 'double ponctuel')
+        cas (str): case ('y' or 'z')
+        q (float): load [MN/m or force unit consistent with formulas]
+        L (float): beam length [m]
+        I (float): moment of inertia [m^4]
+    Returns:
+        Mmax (float): maximum moment
+        Vmax (float): maximum shear
+        deltamax (float): maximum deflection [m]
+    """
+    # Steel Young's modulus
+    E = 2 * 10**5  # MPa = N/mm² (be careful with unit consistency!)
+    if lt == "uniform":
+        if cas == "y":
+            Mmax = q * L**2 / 8
+            Vmax = q * L / 2
+            deltamax = (5/384) * (q * L**4) / (E * I)
+        elif cas == "z":
+            Mmax = q * L**2 / 32
+            Vmax = 0.625 * q * L / 2
+            deltamax = 0.0
+    elif lt == "double ponctuel":
+        a = L / 3
+        if cas == "y":
+            Mmax = q * a
+            Vmax = q
+            deltamax = q * a * (3*L**2 - 4*a**2) / (24 * E * I)
+        elif cas == "z":
+            Mmax = 0.0926 * q * L
+            Vmax = 0.852 * q
+            deltamax = 0.0
+    else:
+        raise ValueError("Unknown load type")
+    return Mmax, Vmax, deltamax
