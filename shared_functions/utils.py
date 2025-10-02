@@ -68,7 +68,7 @@ def beam4(minval,column,T):
         t_idx = vals[vals == t_val].index[0]
     return T.loc[[t_idx]]
 
-def fvplrd(cas, sb, b, Vsd):
+def find_vplrd(cas, sb, b, Vsd):
     # Extract properties (MATLAB sb{1,n} corresponds to sb.iloc[n-1])
     bf = sb["b"].iloc[0]   # flange width (cm)
     tw = sb["tw"].iloc[0]   # web thickness (cm)
@@ -143,7 +143,7 @@ def resistance(T, Mysd, Mzsd):
     wplz = row["wplz"]  # plastic section modulus about z
     r = (Mysd / (wply * fy / 1.1) + Mzsd / (wplz * fy / 1.1)) * 100
     if r <= 1:
-        print("Resistance has been acquired")
+        print("Resistance has been aquired")
     return r
 
 def lateral_torsional_buckling(L, lazb, lt, Nsd, xiz, fy, T, Mzscorr, kz, Mysdn):
@@ -190,7 +190,7 @@ def lateral_torsional_buckling(L, lazb, lt, Nsd, xiz, fy, T, Mzscorr, kz, Mysdn)
     ult = 0.15 * (lazb * betam - 1)
     klt = 1 - (ult * Nsd) / (xiz * A * fy)
     if klt < 1.5 and ult < 0.9:
-        print("On peut vérifier la stabilité au déversement")
+        print("lateral-torsional buckling validation is possible")
     # Characteristic lengths
     L1 = L * 100  # cm
     zg = -h / 2   # cm
@@ -234,7 +234,7 @@ def lateral_torsional_buckling(L, lazb, lt, Nsd, xiz, fy, T, Mzscorr, kz, Mysdn)
         + (kz * Mzscorr * 100) / (wplz * fy / 1.1)
         )
     if r < 1:
-        print("Résistance au déversement est valide")
+        print("lateral-torsional buckling has been aquired")
     return ult, klt, L1, Lfz, zg, k, c1, c2, lalt, laltb, alphalt, philt, xlt, r
 
 def find_epf(epf1, epf10, s):
@@ -299,3 +299,152 @@ def moment_shear_defection(lt, cas, q, L, I):
     else:
         raise ValueError("Unknown load type")
     return Mmax, Vmax, deltamax
+
+def buckling1(L, cas, T, cas2, Ncsd, Ntsd):
+    """
+    Buckling and axial resistance check.
+    Parameters
+    ----------
+    L : float
+        Length (m).
+    cas : str
+        Axis or case ('y', 'z', 'corner').
+    T : pandas.DataFrame or dict-like
+        Section properties (must contain correct indices or keys).
+    cas2 : str
+        Support condition ('double fixed', 'simplement appuye').
+    Ncsd : float
+        Applied compressive force.
+    Ntsd : float
+        Applied tensile force.
+    Returns
+    -------
+    lambda_ : float
+    lambdabar : float
+    alpha : float
+    phi : float
+    Xi : float
+    Nbrd : float
+        Design compressive resistance [kN].
+    Ntrd : float
+        Design tensile resistance [kN].
+    """
+    # Extract values (assuming T is DataFrame with same structure as MATLAB table)
+    h = T["h"].iloc[0]
+    b = T["b"].iloc[0]
+    tf = T["tf"].iloc[0]
+    A = T["A"].iloc[0]
+    fy = 2350.0  # daN/cm²
+    ca, cb, cc = 0.21, 0.34, 0.49
+    if cas == "y":
+        i1 = T["iy"].iloc[0]
+    elif cas == "z":
+        i1 = T["iz"].iloc[0]
+    elif cas == "corner":
+        i1 = T["i"].iloc[0]
+    else:
+        raise ValueError("Invalid cas (must be 'y', 'z' or 'corner')")
+    # Determine alpha1 depending on slenderness and thickness
+    if h / b > 1.2 and tf < 4:
+        if cas == "y":
+            alpha1 = ca
+        elif cas == "z":
+            alpha1 = cb
+    elif h / b <= 1.2 and tf < 10:
+        if cas == "y":
+            alpha1 = cb
+        elif cas == "z":
+            alpha1 = cc
+    else:
+        alpha1 = cc if cas == "corner" else None
+    alpha = alpha1
+    # Effective length factor
+    if cas2 == "double fixed":
+        Lf = L * 50.0  # cm
+    elif cas2 == "simplement appuye":
+        Lf = L * 100.0  # cm
+    else:
+        raise ValueError("Invalid cas2 (must be 'double fixed' or 'simplement appuye')")
+    lambda_ = Lf / i1
+    epsilon = np.sqrt(2350.0 / fy)
+    betaA = 1.0
+    lambdabar = lambda_ / (93.9 * epsilon) * np.sqrt(betaA)
+    phi = 0.5 * (1 + alpha * (lambdabar - 0.2) + lambdabar**2)
+    Xi = 1.0 / (phi + np.sqrt(phi**2 - lambdabar**2))
+    gam1 = 1.1
+    # Resistances (converted to kN)
+    Nbrd = Xi * betaA * A * fy / gam1 * 1e-2
+    Ntrd = A * fy / gam1 * 1e-2
+    if Ncsd < Nbrd and Ntsd < Ntrd:
+        print("Resistance to compression and tension has been aquired")
+    return lambda_, lambdabar, alpha, phi, Xi, Nbrd, Ntrd
+
+def buckling2(lab, T, Nsd, xi, fy, cas):
+    """
+    Buckling stability check.
+    Parameters
+    ----------
+    lab : float
+        Slenderness or buckling length parameter.
+    T : pandas.DataFrame or dict-like
+        Section properties.
+    Nsd : float
+        Applied axial load.
+    xi : float
+        Reduction factor.
+    fy : float
+        Yield strength.
+    cas : str
+        'y' or 'z' axis.
+    Returns
+    -------
+    u : float
+    k : float
+    """
+    A = T["A"].iloc[0]  # T{1,9} in MATLAB
+    if cas == "z":
+        wel = T["welz"].iloc[0]  # T{1,15}
+        wpl = T["wplz"].iloc[0]  # T{1,19}
+    elif cas == "y":
+        wel = T["wely"].iloc[0]  # T{1,11}
+        wpl = T["wply"].iloc[0]  # T{1,18}
+    else:
+        raise ValueError("cas must be 'y' or 'z'")
+    betam = 1.3
+    u = lab * (2 * betam - 4) + (wpl - wel) / wel
+    k = 1 - (u * Nsd) / (xi * A * fy)    
+    if k < 1.5 and u < 0.9:
+        print("Stability under buckling is aquired")    
+    return u, k
+
+def buckling3(Nsd, fy, xiy, xiz, ky, Mysd, T7):
+    """
+    Buckling resistance check.
+    Parameters
+    ----------
+    Nsd : float
+        Applied axial load.
+    fy : float
+        Yield strength.
+    xiy, xiz : float
+        Reduction factors.
+    ky : float
+        Buckling coefficient.
+    Mysd : float
+        Applied bending moment.
+    T7 : pandas.DataFrame or dict-like
+        Section properties.
+    
+    Returns
+    -------
+    xmin : float
+    r : float
+    """
+    A = T7.iloc[0, 8]    # T7{1,9}
+    wply = T7.iloc[0, 17]  # T7{1,18}
+    xmin = min(xiy, xiz)
+    r = Nsd / (xmin * A * fy / 1.1) + (ky * Mysd * 100) / (wply * fy / 1.1)
+    if r < 1:
+        print("Buckling resistance is verified")    
+    return xmin, r
+

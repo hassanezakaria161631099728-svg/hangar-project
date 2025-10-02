@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from .utils import (comb,snow,beam3,fvplrd,bending,resistance,lateral_torsional_buckling,find_epf,
+from .utils import (comb,snow,beam3,find_vplrd,bending,resistance,lateral_torsional_buckling,find_epf,
 moment_shear_defection)
 
 def purlin(b1,b2,hangarf,chI,beamT):
@@ -45,8 +45,8 @@ def purlin(b1,b2,hangarf,chI,beamT):
     acp,combdel,combV,combM,delmax,del2,Vysdn,Vzsdp,Mysdn,Mzscorr,Mysdp,Mzsdp=purlin2(
     Tpanne,qgy,qgz,qw,Qy,Qz,qwp,qsy,qsz,Ly,Tcomb)
     # === Verification (ELU & ELS) ===
-    Avy, Vplrdy = fvplrd("y", Tpanne, "IPE", Vysdn)
-    Avz, Vplrdz = fvplrd("z", Tpanne, "IPE", Vzsdp)
+    Avy, Vplrdy = find_vplrd("y", Tpanne, "IPE", Vysdn)
+    Avz, Vplrdz = find_vplrd("z", Tpanne, "IPE", Vzsdp)
     lbmax, lb2 = bending(del2, delmax, t)
     r1 = resistance(Tpanne, Mysdp, Mzsdp)
     T8 = pd.DataFrame({"delmax": [delmax],"L/200": [lbmax],"del2": [del2],
@@ -61,7 +61,7 @@ def purlin(b1,b2,hangarf,chI,beamT):
         "c1": [c1],"c2": [c2],"lalt": [lalt],"laltb": [laltb],"alphalt": [alphalt],
         "philt": [philt],"xlt": [xlt],"Mysdn": [Mysdn],"Mzscorr": [Mzscorr],"rd": [rd]})
     # === Lierne ===
-    T10 = purlin_bracing(t,qgp,qgc,s,alpha,Lx,Tcomb)
+    T10 = purlin_tie_rod(t,qgp,qgc,s,alpha,Lx,Tcomb)
     return Tpanne, T2, loads, acp, combdel, combV, combM, T8, T9, T10
 
 def purlin0(hangarf, chapterI):
@@ -296,7 +296,7 @@ def purlin24(gy,gz,w,Qy,sy,wp,Qz,sz,Tcomb):
     zscorr = gz * 1e5               # corrected z shear
     return com, ysdn, zscorr, ysdp, zsdp
 
-def purlin_bracing(t,qgp,qgc,s,alpha,L,Tcomb):
+def purlin_tie_rod(t,qgp,qgc,s,alpha,L,Tcomb):
     np_val = 7                 # number of purlins
     d = 1.41                   # spacing (m)
     B = (L / 2) / np.cos(np.radians(alpha)) - 0.6 - d / 2
