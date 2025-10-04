@@ -332,7 +332,10 @@ def buckling1(L, cas, T, cas2, Ncsd, Ntsd):
     # Extract values (assuming T is DataFrame with same structure as MATLAB table)
     h = T["h"].iloc[0]
     b = T["b"].iloc[0]
-    tf = T["tf"].iloc[0]
+    if cas== "corner": 
+         tf = T["t"].iloc[0]
+    else: 
+         tf= T["tf"].iloc[0]
     A = T["A"].iloc[0]
     fy = 2350.0  # daN/cm²
     ca, cb, cc = 0.21, 0.34, 0.49
