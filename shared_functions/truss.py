@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from .utils import buckling1,beam4,lateral_torsional_buckling,buckling2,find_epf
-from.FEM import FEM2D
+from.FEM import FEM2D,create_X_horizontal_truss,plot_truss
 def roof_bracing(hangarf, beamT, chI, chII_1):
     # Read building attributes
     ba = pd.read_excel(hangarf, sheet_name='building attributes')
@@ -16,7 +16,7 @@ def roof_bracing(hangarf, beamT, chI, chII_1):
     e = min(Ly, 2*h)
     # Calls to external functions (need definitions)
     di, df, dI, dII, dIII, h1, h2, s1, s2, s3 = roof_bracing1(ba, e, h)
-    si, sf, ha, hb, sI, sII, sIII = roof_bracing2(s1, s2, s3, dI, dII, ba, h2)
+    si, sf, ha, hb, sI, sII, sIII = roof_bracing2(s1, s2, s3, dI, dII, ba, h)
     T1, qw1 = roof_bracing3(si, sf, sI, sII, sIII, di, df, dI, dII, dIII, chI)
     T2, qw2 = roof_bracing4(di, df, si, sf, chI)
     portal_frame = pd.read_excel(hangarf,sheet_name="portal frame")
@@ -31,7 +31,7 @@ def roof_bracing(hangarf, beamT, chI, chII_1):
     Tdiagonal = beam4(iymin, 12, Tcor)
     T6, q, dF1, dF2 = equivalent_imperfection_load(Trafter, Lx, 'rafter')
     T7 = pd.DataFrame({'h1':[h1], 'h2':[h2], 'ha':[ha], 'hb':[hb], 'q':[q]})
-    T8, T9, T10, p1, d1, d2, R1, R2 = \
+    T8, T9, T10, p1, d1, d2, R1, R2, FV1, FV2 = \
     roof_bracing6(Fwi1, Fwi2,hi, dF1, dF2, qw1, qw2, Lx, Ly, Trafter, Tcolumn, Tdiagonal)
     Tin1    = pd.read_excel(chII_1, sheet_name='T9')
     Tpurlin = pd.read_excel(chII_1, sheet_name='Tpurlin')
@@ -66,7 +66,7 @@ def roof_bracing(hangarf, beamT, chI, chII_1):
         'lambda':[lambda_], 'lambdabar':[lambdabar], 'alpha':[alpha], 'phi':[phi], 'Xi':[Xi],
         'Nbrd':[Nbrd], 'Ntrd':[Ntrd], 'Ncsd':[Ncsd], 'Ntsd':[Ntsd], 'R1':[R11], 'R2':[R21]
                        })
-    return T1, T2, Trafter, Tcolumn, Tdiagonal, T6, T7, T8, T9, T10, T11, T12, T13
+    return T1, T2, Trafter, Tcolumn, Tdiagonal, T6, T7, T8, T9, T10, T11, T12, T13,FV1,FV2
 
 def roof_bracing1(ba, e, h3):
     """
@@ -369,37 +369,37 @@ def roof_bracing6(Fwi1, Fwi2, hi, dF1, dF2, qw1, qw2, Lx, Ly, Trafter, Tcolumn, 
     # Geometry of truss
     l = Lx / 4
     t = Ly / 4
-    nodes = np.array([
-        [0, 0], [l, 0], [2*l, 0], [3*l, 0], [4*l, 0],
-        [0, t], [l, t], [2*l, t], [3*l, t], [4*l, t]
-    ])
-    elements = np.array([
-        [1,2],[2,3],[3,4],[4,5],      # bottom chords
-        [6,7],[7,8],[8,9],[9,10],     # top chords
-        [1,6],[2,7],[3,8],[4,9],[5,10], # verticals
-        [1,7],[2,6],[2,8],[3,7],[3,9],[4,8],[4,10],[5,9]  # diagonals
-    ]) - 1   # MATLAB is 1-based, Python is 0-based
+    n_panel=4 
+    nodes, elements = create_X_horizontal_truss(n_panel, l, t)
     # Loads for each truss case
-    loads1 = np.array([[2,F1[0]], [4,F1[1]], [6,F1[2]], [8,F1[3]], [10,F1[4]]]) - 1
-    loads2 = np.array([[2,F2[0]], [4,F2[1]], [6,F2[2]], [8,F2[3]], [10,F2[4]]]) - 1
-    constraints = np.array([1, 2, 9, 10]) - 1
+    loads1 = np.array([[1,F1[0]], [3,F1[1]], [5,F1[2]], [7,F1[3]], [9,F1[4]]]) 
+    loads2 = np.array([[1,F2[0]], [3,F2[1]], [5,F2[2]], [7,F2[3]], [9,F2[4]]]) 
+    constraints = np.array([0, 1, 8, 9])
+    plot_truss(nodes, elements, constraints, loads1)
+    plot_truss(nodes, elements, constraints, loads2)     
     # Areas *1e-4 convert cm2 to m2
     A_h = Trafter["A"].iloc[0] * 1e-4   # horizontal 
     A_v = Tcolumn["A"].iloc[0] * 1e-4    # vertical
     A_d = Tdiagonal["A"].iloc[0] * 1e-4   # diagonal
     # FEM solver (you must already have FEM2D4 translated into Python)
-    u1, R1, FV1 = FEM2D(A_h, A_v, A_d, nodes, elements, loads1, constraints)
-    u2, R2, FV2 = FEM2D(A_h, A_v, A_d, nodes, elements, loads2, constraints)
-    # Axial forces tables
-    c1 = ['P1','P2','P3','P4','P5']
-    p1 = FV1[8:13]
-    p2 = FV2[8:13]
+    _, R1, FV1,elem_types1 = FEM2D(A_h, A_v, A_d, nodes, elements, loads1, constraints)
+    _, R2, FV2,elem_types2 = FEM2D(A_h, A_v, A_d, nodes, elements, loads2, constraints)
+ # --- Extract vertical (purlins) and diagonal elements automatically ---
+    elem_types1 = np.array(elem_types1)  # ensure it's an array for easy filtering
+    elem_types2 = np.array(elem_types2)
+# Vertical elements (purlins)
+    vert_idx = np.where(elem_types1 == 'V')[0]
+    c1 = [f'P{i+1}' for i in range(len(vert_idx))]
+    p1 = FV1[vert_idx]
+    p2 = FV2[vert_idx]
     T9 = pd.DataFrame({'purlin': c1, 'wind1': p1, 'wind2': p2})
-    c2 = ['D1','D2','D3','D4','D5','D6','D7','D8']
-    d1 = FV1[13:21]
-    d2 = FV2[13:21]
-    T10 = pd.DataFrame({'diagonal': c2, 'wind1': d1, 'wind2': d2})
-    return T8, T9, T10, p1, d1, d2, R1, R2
+# Diagonal elements
+    diag_idx = np.where(elem_types1 == 'D')[0]
+    c2 = [f'D{i+1}' for i in range(len(diag_idx))]
+    d1 = FV1[diag_idx]
+    d2 = FV2[diag_idx]
+    T10 = pd.DataFrame({'diagonal': c2, 'wind1': d1, 'wind2': d2})   
+    return T8, T9, T10, p1, d1, d2, R1, R2,FV1,FV2
 
 def equivalent_imperfection_load(T, L, cas):
     """
@@ -424,8 +424,9 @@ def equivalent_imperfection_load(T, L, cas):
         T2 = pd.DataFrame({'h': [h], 'Mcrd': [Mcrd], 'N': [N]})
     elif cas == 'column':
         # Assume buckling1 is defined elsewhere and returns 6 values
-        laz, labz, alphaz, phiz, Xiz, N = buckling1(L, 'z', T, 'simplement appuye', 0, 0)
+        Lf,laz, labz, alphaz, phiz, Xiz, N,_ = buckling1(L, 'z', T, 'simplement appuye', 0, 0)
         T2 = pd.DataFrame({
+            'Lf':[Lf],
             'laz': [laz],
             'labz': [labz],
             'alphaz': [alphaz],
@@ -447,3 +448,95 @@ def equivalent_imperfection_load(T, L, cas):
         dF2 = dF1    
     return T2, q, dF1, dF2
 
+def wall_bracing(beamT, chIII_1, hangarf):
+    # Read Excel sheets
+    ba = pd.read_excel(hangarf, sheet_name='building attributes')
+    Tin1 = pd.read_excel(chIII_1, sheet_name='Tcolumn')
+    THEA = pd.read_excel(beamT, sheet_name='HEA')
+    Tin2 = pd.read_excel(chIII_1, sheet_name='T13')
+    Tcorner = pd.read_excel(beamT, sheet_name='corniere')
+    # Extract key values
+    floor_height=ba["floor_height_m"].iloc[0]
+    n_floors=ba["n_floors"].iloc[0]
+    hp=ba["hp_m"].iloc[0] 
+    h = floor_height*n_floors+hp
+    Ly = ba["Ly_m"].iloc[0]
+    # Equivalent of: [T1, q, df1, df2] = chaeqimp(in, h-2, 'poteau')
+    T1, q, df1, df2 = equivalent_imperfection_load(Tin1, h - 2, 'column')
+    # Build T2 table
+    T2 = pd.DataFrame({'q': [q], 'df1': [df1], 'df2': [df2]})
+    # Eave purlin class determination
+    t = Ly / 4
+    izmin = t / 300  # slenderness check
+    TEave_purlin = beam4(izmin, 16, THEA)  # HEA beam
+    # Diagonal braces class determination
+    L = np.sqrt((h - 2)**2 + (t / 2)**2)
+    iymin = L / 3
+    Tdiagonal = beam4(iymin, 12, Tcorner)  # corniere
+    # Vertical beam (column) data again
+    Tcolumn=Tin1 
+    #Tcolumn = pd.read_excel(chIII_1, sheet_name='Tcolumn')
+    # Geometry (nodes and elements)
+    nodes = np.array([
+        [0, 0],
+        [t, 0],
+        [0, h - 2],
+        [t / 2, h - 2],
+        [t, h - 2]
+    ])
+    elements = np.array([
+        [2, 3], [3, 4],  # top
+        [0, 2], [1, 4],  # verticals
+        [0, 3], [3, 1]   # diagonals
+    ])
+    R1 = Tin2["R1"].iloc[0]
+    R2 = Tin2["R2"].iloc[0]
+    loads1 = np.array([
+        [0, -1 * df2],
+        [4, -1 * (df1 + R1)]
+    ])
+    loads2 = np.array([
+        [0, df2],
+        [4, R2 + df1]
+    ])
+    constraints = [0, 1, 2, 3]
+    plot_truss(nodes,elements,loads1,constraints)
+    plot_truss(nodes,elements,loads2,constraints)
+    # Cross-sectional areas (m²)
+    A_h = TEave_purlin["A"].iloc[0] * 1e-4
+    A_v = Tcolumn["A"].iloc[0] * 1e-4 # section of column
+    A_d = Tdiagonal["A"].iloc[0] * 1e-4
+    # Finite element results
+    _, _, FV1,_ = FEM2D(A_h, A_v, A_d, nodes, elements, loads1, constraints)
+    _, _, FV2,_ = FEM2D(A_h, A_v, A_d, nodes, elements, loads2, constraints)
+    c = ['s1', 's2', 'poteau', 'potelet', 'd1', 'd2']
+    T3 = pd.DataFrame({'element': c, 'vent1': FV1, 'vent2': FV2})
+    Ncsdps = -FV2[0]
+    Ncsdd = FV2[4]
+    # Verification — Eave purlin
+    Lfh,laz, lazb, alphaz, phiz, Xiz, Nbrdz,_ = buckling1(t, 'z', TEave_purlin, 'simplement appuye', Ncsdps, 1)
+    # Verification — Diagonals
+    Lfd,lay, layb, alphay, phiy, Xiy, Nbrdy,_ = buckling1(L, 'corner', Tdiagonal, 'simplement appuye', Ncsdd, 1)
+    T4 = pd.DataFrame({
+        't': [t],
+        'Lfh':[Lfh], 
+        'laz': [laz],
+        'lazb': [lazb],
+        'alphaz': [alphaz],
+        'phiz': [phiz],
+        'Xiz': [Xiz],
+        'Nbrdz': [Nbrdz],
+        'Ncsdps': [Ncsdps]
+    })
+    T5 = pd.DataFrame({
+        'L': [L],
+        'Lfd':[Lfd],
+        'lay': [lay],
+        'layb': [layb],
+        'alphay': [alphay],
+        'phiy': [phiy],
+        'Xiy': [Xiy],
+        'Nbrdy': [Nbrdy],
+        'Ncsdd': [Ncsdd]
+    })
+    return T1, T2, TEave_purlin, Tdiagonal, T3, T4, T5

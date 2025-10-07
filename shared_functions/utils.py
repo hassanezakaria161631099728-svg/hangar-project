@@ -333,7 +333,7 @@ def buckling1(L, cas, T, cas2, Ncsd, Ntsd):
     h = T["h"].iloc[0]
     b = T["b"].iloc[0]
     if cas== "corner": 
-         tf = T["t"].iloc[0]
+         tf = T["t"].iloc[0]/10
     else: 
          tf= T["tf"].iloc[0]
     A = T["A"].iloc[0]
@@ -358,8 +358,8 @@ def buckling1(L, cas, T, cas2, Ncsd, Ntsd):
             alpha1 = cb
         elif cas == "z":
             alpha1 = cc
-    else:
-        alpha1 = cc if cas == "corner" else None
+        elif cas=="corner":
+            alpha1=cc
     alpha = alpha1
     # Effective length factor
     if cas2 == "double fixed":
@@ -376,11 +376,17 @@ def buckling1(L, cas, T, cas2, Ncsd, Ntsd):
     Xi = 1.0 / (phi + np.sqrt(phi**2 - lambdabar**2))
     gam1 = 1.1
     # Resistances (converted to kN)
-    Nbrd = Xi * betaA * A * fy / gam1 * 1e-2
-    Ntrd = A * fy / gam1 * 1e-2
-    if Ncsd < Nbrd and Ntsd < Ntrd:
-        print("Resistance to compression and tension has been aquired")
-    return lambda_, lambdabar, alpha, phi, Xi, Nbrd, Ntrd
+    if cas=="corner":
+     Nbrd = Xi * betaA * 2 * A * fy / gam1 * 1e-2
+     Ntrd = 2 * A * fy / gam1 * 1e-2
+    else:
+     Nbrd = Xi * betaA * A * fy / gam1 * 1e-2
+     Ntrd = A * fy / gam1 * 1e-2
+    if Ncsd < Nbrd:
+        print("Resistance to compression has been aquired")
+    if Ntsd < Ntrd:
+        print("Resistance to tension has been aquired")
+    return Lf,lambda_, lambdabar, alpha, phi, Xi, Nbrd, Ntrd
 
 def buckling2(lab, T, Nsd, xi, fy, cas):
     """

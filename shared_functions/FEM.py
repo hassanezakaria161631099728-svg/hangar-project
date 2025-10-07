@@ -1,93 +1,130 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-def FEM2D(A_h, A_v, A_d, nodes, elements, loads, constraints):
+def FEM2D(A_h, A_v, A_d, nodes, elements, loads, constraints, E=210e6):
     """
-    FEM2D - 2D Truss Solver with auto section assignment
+    FEM2D - Simplified 2D Truss Solver (Pythonic convention) [kN, m units]
+    Parameters
+    ----------
+    A_h, A_v, A_d : float
+        Cross-sectional areas (m²) for horizontal, vertical, and diagonal members.
+    nodes : ndarray (n_nodes x 2)
+        Node coordinates [x, y] in meters.
+    elements : ndarray (n_elems x 2)
+        Element connectivity (0-based node indices).
+    loads : ndarray (n_loads x 2)
+        External loads: [DOF_index, force_value] in kN.
+    constraints : list or ndarray
+        Constrained DOFs (0-based global DOF indices).
+    E : float
+        Young’s modulus (kN/m²). Default = 210000 kN/m² ≈ 210 GPa.
+    Returns
+    -------
+    u : ndarray (n_dofs,)
+        Global displacement vector (m).
+    reactions : ndarray
+        Reaction forces at constrained DOFs (kN).
+    axial_forces : ndarray (n_elems,)
+        Axial force in each truss element (kN).
+    elem_types : list of str
+        List of element types: 'H', 'V', or 'D'.
     """
-    # Young's modulus [kPa] [kN/m2]
-    E = 210e6  
     n_nodes = nodes.shape[0]
-    n_dofs = 2 * n_nodes
     n_elems = elements.shape[0]
+    n_dofs = 2 * n_nodes
+    # --- Global matrices ---
     K_global = np.zeros((n_dofs, n_dofs))
-    F_global = np.zeros(n_dofs)   # 1D force vector
+    F_global = np.zeros(n_dofs)
+    elem_types = []  # Track element type: 'H', 'V', 'D'
     # --- Assemble stiffness matrix ---
     for e in range(n_elems):
-        n1, n2 = elements[e, :] - 1
-        x1, y1 = nodes[n1, :]
-        x2, y2 = nodes[n2, :]
+        n1, n2 = elements[e]
+        x1, y1 = nodes[n1]
+        x2, y2 = nodes[n2]
         L = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
         C = (x2 - x1) / L
         S = (y2 - y1) / L
-        # Detect element type
-        if abs(y1 - y2) < 1e-6:
+        # Assign correct area and type
+        if abs(y1 - y2) < 1e-9:
             A = A_h
-        elif abs(x1 - x2) < 1e-6:
+            elem_types.append('H')
+        elif abs(x1 - x2) < 1e-9:
             A = A_v
+            elem_types.append('V')
         else:
             A = A_d
-        # Local stiffness
+            elem_types.append('D')
+        # Local stiffness matrix
         k_local = (E * A / L) * np.array([
-            [ C**2,  C*S,   -C**2, -C*S ],
-            [ C*S,   S**2,  -C*S,  -S**2],
-            [-C**2, -C*S,   C**2,  C*S ],
-            [-C*S,  -S**2,  C*S,   S**2]
+            [ C*C,  C*S, -C*C, -C*S],
+            [ C*S,  S*S, -C*S, -S*S],
+            [-C*C, -C*S,  C*C,  C*S],
+            [-C*S, -S*S,  C*S,  S*S]
         ])
-        dof_map = [2*n1, 2*n1+1, 2*n2, 2*n2+1]
-        for i in range(4):
-            for j in range(4):
-                K_global[dof_map[i], dof_map[j]] += k_local[i, j]
-    # --- Apply loads ---
-    for i in range(loads.shape[0]):
-        dof, force = loads[i, :]
-        F_global[int(dof) - 1] += force
+        # DOF mapping
+        dof = [2*n1, 2*n1+1, 2*n2, 2*n2+1]
+        K_global[np.ix_(dof, dof)] += k_local
+    # --- Apply loads (in kN) ---
+    for dof, value in loads:
+        F_global[int(dof)] += value
     # --- Solve system ---
     all_dofs = np.arange(n_dofs)
-    free_dofs = np.setdiff1d(all_dofs, np.array(constraints) - 1)
+    free_dofs = np.setdiff1d(all_dofs, constraints)
+    K_ff = K_global[np.ix_(free_dofs, free_dofs)]
+    F_ff = F_global[free_dofs]
     u = np.zeros(n_dofs)
-    K_red = K_global[np.ix_(free_dofs, free_dofs)]
-    F_red = F_global[free_dofs]
-    u_red = np.linalg.solve(K_red, F_red)
-    u[free_dofs] = u_red   # fill free dofs
+    u[free_dofs] = np.linalg.solve(K_ff, F_ff)
     # --- Reactions ---
     R = K_global @ u - F_global
-    reactions = R[np.array(constraints) - 1]
+    reactions = R[constraints]
     # --- Axial forces ---
     axial_forces = np.zeros(n_elems)
     for e in range(n_elems):
-        n1, n2 = elements[e, :] - 1
-        x1, y1 = nodes[n1, :]
-        x2, y2 = nodes[n2, :]
+        n1, n2 = elements[e]
+        x1, y1 = nodes[n1]
+        x2, y2 = nodes[n2]
         L = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
         C = (x2 - x1) / L
         S = (y2 - y1) / L
-        if abs(y1 - y2) < 1e-6:
+        # Reuse same A logic
+        if elem_types[e] == 'H':
             A = A_h
-        elif abs(x1 - x2) < 1e-6:
+        elif elem_types[e] == 'V':
             A = A_v
         else:
             A = A_d
-        dof_map = [2*n1, 2*n1+1, 2*n2, 2*n2+1]
-        u_elem = u[dof_map]   # works fine (1D)
+        dof = [2*n1, 2*n1+1, 2*n2, 2*n2+1]
+        u_elem = u[dof]
         T = np.array([-C, -S, C, S])
         axial_forces[e] = (E * A / L) * (T @ u_elem)
-    return u, reactions, axial_forces
+    return u, reactions, axial_forces, elem_types
 
-def plot_truss2(nodes, elements=None):
+def plot_truss(nodes, elements=None, loads=None, constraints=None,load_scale=0.2):
     """
-    Plot a 2D truss structure with color-coded members and node labels.
-    - Green: horizontal members
-    - Yellow: vertical members
-    - Blue: diagonal members
+    Plot a 2D truss structure with color-coded members, boundary conditions, and nodal loads.
+    Colors:
+        - Green: horizontal members
+        - Yellow: vertical members
+        - Blue: diagonal members
+        - Purple: double fixed node (X and Y)
+        - Green: fixed X
+        - Brown: fixed Y
+        - Black: free node
+        - Red arrows: applied loads
     Parameters
     ----------
     nodes : ndarray (n_nodes x 2)
-        Nodal coordinates [x, y] in meters.
+        Nodal coordinates [x, y].
     elements : ndarray (n_elems x 2), optional
-        Element connectivity (node1, node2). 
-        If None or empty, only nodes are plotted.
-        Node numbering can be 0-based or 1-based.
+        Element connectivity (node1, node2). 0- or 1-based indexing.
+    constraints : list or ndarray, optional
+        List of fixed DOFs (0-based). Example [0, 1, 7] means:
+            - Node 0 fixed in X and Y
+            - Node 3 fixed in Y (since 7 = 3*2 + 1)
+    loads : ndarray or list, optional
+        [[DOF_index, force_value], ...] — global DOF loads (FEM2D2 style)
+    load_scale : float
+        Arrow scaling for load visualization.
     """
     plt.figure(figsize=(8, 5))
     plt.axis("equal")
@@ -95,41 +132,87 @@ def plot_truss2(nodes, elements=None):
     plt.xlabel("X (m)")
     plt.ylabel("Y (m)")
     plt.title("2D Truss Geometry")
-    # --- Plot nodes ---
+    n_nodes = len(nodes)
+    n_dofs = n_nodes * 2
+    # --- Build constraint map per node ---
+    node_constraints = np.zeros((n_nodes, 2), dtype=bool)  # [Fx_fixed, Fy_fixed]
+    if constraints is not None:
+        for dof in constraints:
+            node = dof // 2
+            dirn = dof % 2  # 0 = X, 1 = Y
+            if node < n_nodes:
+                node_constraints[node, dirn] = True
+    # --- Node color logic ---
     for i, (x, y) in enumerate(nodes):
-        plt.plot(x, y, 'ro', markersize=8, markerfacecolor='r')
-        plt.text(x + 0.1, y, f"N{i+1}", fontsize=10)
-    # --- Skip element plotting if not provided ---
-    if elements is None or len(elements) == 0:
-        plt.show()
-        return
-    # Detect if elements are 1-based or 0-based
-    if elements.min() == 1:
-        elements = elements - 1  # convert to 0-based
-    Pcount = 0  # vertical label counter
-    Dcount = 0  # diagonal label counter
-    # --- Plot elements ---
-    for i in range(elements.shape[0]):
-        n1, n2 = elements[i, :]
-        x = [nodes[n1, 0], nodes[n2, 0]]
-        y = [nodes[n1, 1], nodes[n2, 1]]
-        xm, ym = np.mean(x), np.mean(y)
-        # Determine orientation
-        if abs(y[0] - y[1]) < 1e-6:  # horizontal
-            color = "g"
+        fixed_x, fixed_y = node_constraints[i]
+        if fixed_x and fixed_y:
+            color = 'purple'  # double fixed
+        elif fixed_x:
+            color = 'green'   # fixed X
+        elif fixed_y:
+            color = 'brown'   # fixed Y
+        else:
+            color = 'black'   # free
+        plt.plot(x, y, 'o', color=color, markersize=8)
+        plt.text(x + 0.15, y, f"N{i+1}", fontsize=10, color='k')
+    # --- Adjust element indexing if 1-based ---
+    if elements is not None and len(elements) > 0:
+        if elements.min() == 1:
+            elements = elements - 1
+        # --- Plot members and label verticals/diagonals ---
+        vert_count = 0
+        diag_count = 0
+        for i in range(elements.shape[0]):
+            n1, n2 = elements[i, :]
+            x = [nodes[n1, 0], nodes[n2, 0]]
+            y = [nodes[n1, 1], nodes[n2, 1]]
+            xm, ym = np.mean(x), np.mean(y)
+            # Determine orientation
+            if abs(y[0] - y[1]) < 1e-6:
+                color = "g"  # horizontal
+                label = None
+            elif abs(x[0] - x[1]) < 1e-6:
+                color = "y"  # vertical
+                vert_count += 1
+                label = f"P{vert_count}"
+            else:
+                color = "b"  # diagonal
+                diag_count += 1
+                label = f"D{diag_count}"
             plt.plot(x, y, color=color, linewidth=2)
-        elif abs(x[0] - x[1]) < 1e-6:  # vertical
-            color = "y"
-            plt.plot(x, y, color=color, linewidth=2)
-            Pcount += 1
-            plt.text(xm, ym, f"P{Pcount}", fontsize=10, color="k",
-                     fontweight="bold", ha="center", va="center")
-        else:  # diagonal
-            color = "b"
-            plt.plot(x, y, color=color, linewidth=2)
-            Dcount += 1
-            plt.text(xm, ym, f"D{Dcount}", fontsize=10, color="k",
-                     fontweight="bold", ha="center", va="center")
+            if label:
+                plt.text(xm, ym, label, fontsize=10, color="k",
+                         fontweight="bold", ha="center", va="center")
+    # --- Plot loads (DOF-based only) ---
+    if loads is not None and len(loads) > 0:
+        node_loads = np.zeros((n_nodes, 2))
+        for dof, val in loads:
+            dof = int(dof)
+            node = dof // 2
+            dirn = dof % 2
+            if node < n_nodes:
+                node_loads[node, dirn] += val
+        for i, (Fx, Fy) in enumerate(node_loads):
+            if abs(Fx) > 1e-9 or abs(Fy) > 1e-9:
+                x, y = nodes[i]
+                plt.arrow(
+                    x, y,
+                    load_scale * Fx, load_scale * Fy,
+                    head_width=0.15, head_length=0.25,
+                    fc='red', ec='red', linewidth=1.5, zorder=5
+                )
+    # --- Legend ---
+    legend_items = [
+        plt.Line2D([], [], color='g', lw=2, label='Horizontal member'),
+        plt.Line2D([], [], color='y', lw=2, label='Vertical member (Pn)'),
+        plt.Line2D([], [], color='b', lw=2, label='Diagonal member (Dn)'),
+        plt.Line2D([], [], color='purple', marker='o', linestyle='None', label='Double fixed'),
+        plt.Line2D([], [], color='green', marker='o', linestyle='None', label='Fixed X'),
+        plt.Line2D([], [], color='brown', marker='o', linestyle='None', label='Fixed Y'),
+        plt.Line2D([], [], color='black', marker='o', linestyle='None', label='Free'),
+        plt.Line2D([], [], color='red', marker=r'$\rightarrow$', linestyle='None', label='Load')
+    ]
+    plt.legend(handles=legend_items, loc='upper right', fontsize=8)
     plt.show()
 
 def create_roof_bracing(num_panels=4, panel_length=4.0, height=4.0):
@@ -249,7 +332,7 @@ def create_truss_nodes(n_panel: int, L: float, t: float):
     nodes = np.column_stack((x_all, y_all))
     return nodes
 
-def create_X_braced_truss(n_panel: int, L: float, t: float):
+def create_X_horizontal_truss(n_panel: int, L: float, t: float):
     """
     Create node coordinates and connectivity matrix for a 2D X-braced truss.
     Parameters
@@ -362,4 +445,5 @@ def create_vertical_bracing_truss(nf: int, h: float, L: float):
     nodes = create_vertical_bracing_nodes(nf, h, L)
     elements = create_vertical_bracing_elements(nf)
     return nodes, elements
+
 
